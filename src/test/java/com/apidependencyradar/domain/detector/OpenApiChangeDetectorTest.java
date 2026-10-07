@@ -360,4 +360,539 @@ class OpenApiChangeDetectorTest {
         assertEquals("POST /users", change.endpoint());
         assertTrue(change.breaking());
     }
+
+    @Test
+    void shouldDetectRequestBodyPropertyRemoved() {
+
+        String oldSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 1.0.0
+                paths:
+                  /users:
+                    post:
+                      requestBody:
+                        required: true
+                        content:
+                          application/json:
+                            schema:
+                              type: object
+                              properties:
+                                name:
+                                  type: string
+                                email:
+                                  type: string
+                      responses:
+                        "201":
+                          description: Created
+                """;
+
+        String newSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 2.0.0
+                paths:
+                  /users:
+                    post:
+                      requestBody:
+                        required: true
+                        content:
+                          application/json:
+                            schema:
+                              type: object
+                              properties:
+                                name:
+                                  type: string
+                      responses:
+                        "201":
+                          description: Created
+                """;
+
+        List<ApiChange> changes = detector.detect(oldSpec, newSpec);
+
+        assertEquals(1, changes.size());
+
+        ApiChange change = changes.get(0);
+
+        assertEquals("OPENAPI", change.sourceType());
+        assertEquals("REQUEST_PROPERTY_REMOVED", change.type());
+        assertEquals("POST /users", change.endpoint());
+        assertTrue(change.breaking());
+    }
+
+    @Test
+    void shouldDetectResponsePropertyRemoved() {
+
+        String oldSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 1.0.0
+                paths:
+                  /users/{id}:
+                    get:
+                      parameters:
+                        - name: id
+                          in: path
+                          required: true
+                          schema:
+                            type: string
+                      responses:
+                        "200":
+                          description: OK
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                  name:
+                                    type: string
+                                  email:
+                                    type: string
+                """;
+
+        String newSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 2.0.0
+                paths:
+                  /users/{id}:
+                    get:
+                      parameters:
+                        - name: id
+                          in: path
+                          required: true
+                          schema:
+                            type: string
+                      responses:
+                        "200":
+                          description: OK
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                  name:
+                                    type: string
+                """;
+
+        List<ApiChange> changes = detector.detect(oldSpec, newSpec);
+
+        assertEquals(1, changes.size());
+
+        ApiChange change = changes.get(0);
+
+        assertEquals("OPENAPI", change.sourceType());
+        assertEquals("RESPONSE_PROPERTY_REMOVED", change.type());
+        assertEquals("GET /users/{id}", change.endpoint());
+        assertTrue(change.breaking());
+    }
+
+    @Test
+    void shouldDetectResponsePropertyBecomingRequired() {
+
+        String oldSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 1.0.0
+                paths:
+                  /users/{id}:
+                    get:
+                      parameters:
+                        - name: id
+                          in: path
+                          required: true
+                          schema:
+                            type: string
+                      responses:
+                        "200":
+                          description: OK
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                  email:
+                                    type: string
+                """;
+
+        String newSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 2.0.0
+                paths:
+                  /users/{id}:
+                    get:
+                      parameters:
+                        - name: id
+                          in: path
+                          required: true
+                          schema:
+                            type: string
+                      responses:
+                        "200":
+                          description: OK
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                  email:
+                                    type: string
+                                required:
+                                  - email
+                """;
+
+        List<ApiChange> changes = detector.detect(oldSpec, newSpec);
+
+        assertEquals(1, changes.size());
+
+        ApiChange change = changes.get(0);
+
+        assertEquals("OPENAPI", change.sourceType());
+        assertEquals("REQUIRED_RESPONSE_PROPERTY", change.type());
+        assertEquals("GET /users/{id}", change.endpoint());
+        assertTrue(change.breaking());
+    }
+
+    @Test
+    void shouldDetectRequestParameterTypeChanged() {
+
+        String oldSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 1.0.0
+                paths:
+                  /users:
+                    get:
+                      parameters:
+                        - name: page
+                          in: query
+                          required: false
+                          schema:
+                            type: integer
+                      responses:
+                        "200":
+                          description: OK
+                """;
+
+        String newSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 2.0.0
+                paths:
+                  /users:
+                    get:
+                      parameters:
+                        - name: page
+                          in: query
+                          required: false
+                          schema:
+                            type: string
+                      responses:
+                        "200":
+                          description: OK
+                """;
+
+        List<ApiChange> changes = detector.detect(oldSpec, newSpec);
+
+        assertEquals(1, changes.size());
+
+        ApiChange change = changes.get(0);
+
+        assertEquals("OPENAPI", change.sourceType());
+        assertEquals("REQUEST_PARAMETER_TYPE_CHANGED", change.type());
+        assertEquals("GET /users", change.endpoint());
+        assertTrue(change.breaking());
+    }
+
+    @Test
+    void shouldDetectRequestPropertyTypeChanged() {
+
+        String oldSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 1.0.0
+                paths:
+                  /users:
+                    post:
+                      requestBody:
+                        required: true
+                        content:
+                          application/json:
+                            schema:
+                              type: object
+                              properties:
+                                age:
+                                  type: integer
+                      responses:
+                        "201":
+                          description: Created
+                """;
+
+        String newSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 2.0.0
+                paths:
+                  /users:
+                    post:
+                      requestBody:
+                        required: true
+                        content:
+                          application/json:
+                            schema:
+                              type: object
+                              properties:
+                                age:
+                                  type: string
+                      responses:
+                        "201":
+                          description: Created
+                """;
+
+        List<ApiChange> changes = detector.detect(oldSpec, newSpec);
+
+        assertEquals(1, changes.size());
+
+        ApiChange change = changes.get(0);
+
+        assertEquals("OPENAPI", change.sourceType());
+        assertEquals("REQUEST_PROPERTY_TYPE_CHANGED", change.type());
+        assertEquals("POST /users", change.endpoint());
+        assertTrue(change.breaking());
+    }
+
+    @Test
+    void shouldDetectResponsePropertyTypeChanged() {
+
+        String oldSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 1.0.0
+                paths:
+                  /users:
+                    get:
+                      responses:
+                        "200":
+                          description: OK
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  age:
+                                    type: integer
+                """;
+
+        String newSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 2.0.0
+                paths:
+                  /users:
+                    get:
+                      responses:
+                        "200":
+                          description: OK
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  age:
+                                    type: string
+                """;
+
+        List<ApiChange> changes = detector.detect(oldSpec, newSpec);
+
+        assertEquals(1, changes.size());
+
+        ApiChange change = changes.get(0);
+
+        assertEquals("OPENAPI", change.sourceType());
+        assertEquals("RESPONSE_PROPERTY_TYPE_CHANGED", change.type());
+        assertEquals("GET /users", change.endpoint());
+        assertTrue(change.breaking());
+    }
+
+    @Test
+    void shouldDetectResponseStatusCodeRemoved() {
+
+        String oldSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 1.0.0
+                paths:
+                  /users:
+                    get:
+                      responses:
+                        "200":
+                          description: OK
+                        "404":
+                          description: Not Found
+                """;
+
+        String newSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 2.0.0
+                paths:
+                  /users:
+                    get:
+                      responses:
+                        "200":
+                          description: OK
+                """;
+
+        List<ApiChange> changes = detector.detect(oldSpec, newSpec);
+
+        assertEquals(1, changes.size());
+
+        ApiChange change = changes.get(0);
+
+        assertEquals("OPENAPI", change.sourceType());
+        assertEquals("RESPONSE_STATUS_REMOVED", change.type());
+        assertEquals("GET /users", change.endpoint());
+        assertTrue(change.breaking());
+    }
+
+    @Test
+    void shouldDetectRequestEnumValueRemoved() {
+
+        String oldSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 1.0.0
+                paths:
+                  /users:
+                    get:
+                      parameters:
+                        - name: status
+                          in: query
+                          required: false
+                          schema:
+                            type: string
+                            enum:
+                              - ACTIVE
+                              - INACTIVE
+                      responses:
+                        "200":
+                          description: OK
+                """;
+
+        String newSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 2.0.0
+                paths:
+                  /users:
+                    get:
+                      parameters:
+                        - name: status
+                          in: query
+                          required: false
+                          schema:
+                            type: string
+                            enum:
+                              - ACTIVE
+                      responses:
+                        "200":
+                          description: OK
+                """;
+
+        List<ApiChange> changes = detector.detect(oldSpec, newSpec);
+
+        assertEquals(1, changes.size());
+
+        ApiChange change = changes.get(0);
+
+        assertEquals("OPENAPI", change.sourceType());
+        assertEquals("REQUEST_ENUM_VALUE_REMOVED", change.type());
+        assertEquals("GET /users", change.endpoint());
+        assertTrue(change.breaking());
+    }
+
+    @Test
+    void shouldDetectResponseEnumValueRemoved() {
+
+        String oldSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 1.0.0
+                paths:
+                  /users:
+                    get:
+                      responses:
+                        "200":
+                          description: OK
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  status:
+                                    type: string
+                                    enum:
+                                      - ACTIVE
+                                      - INACTIVE
+                """;
+
+        String newSpec = """
+                openapi: 3.0.0
+                info:
+                  title: Test API
+                  version: 2.0.0
+                paths:
+                  /users:
+                    get:
+                      responses:
+                        "200":
+                          description: OK
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  status:
+                                    type: string
+                                    enum:
+                                      - ACTIVE
+                """;
+
+        List<ApiChange> changes = detector.detect(oldSpec, newSpec);
+
+        assertEquals(1, changes.size());
+
+        ApiChange change = changes.get(0);
+
+        assertEquals("OPENAPI", change.sourceType());
+        assertEquals("RESPONSE_ENUM_VALUE_REMOVED", change.type());
+        assertEquals("GET /users", change.endpoint());
+        assertTrue(change.breaking());
+    }
 }
