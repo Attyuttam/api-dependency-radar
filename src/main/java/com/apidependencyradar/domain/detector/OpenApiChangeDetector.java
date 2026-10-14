@@ -411,16 +411,16 @@ public class OpenApiChangeDetector implements ApiChangeDetector {
         if (oldSchema == null || newSchema == null) {
             return;
         }
+
+        var oldProperties = oldSchema.getProperties() == null
+                ? Map.<String, io.swagger.v3.oas.models.media.Schema>of()
+                : oldSchema.getProperties();
+
         var newProperties = newSchema.getProperties() == null
-                ? Map.of()
+                ? Map.<String, io.swagger.v3.oas.models.media.Schema>of()
                 : newSchema.getProperties();
 
-        for (Object property : oldSchema.getProperties().keySet()) {
-
-            if (!(property instanceof String propertyName)) {
-                continue;
-            }
-
+        for (String propertyName : oldProperties.keySet()) {
             if (!newProperties.containsKey(propertyName)) {
                 changes.add(new ApiChange(
                         "OPENAPI",

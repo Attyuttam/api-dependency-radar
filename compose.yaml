@@ -1,0 +1,22 @@
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: api-radar-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: api_dependency_radar
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - api_radar_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d api_dependency_radar"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  api_radar_postgres_data:

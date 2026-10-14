@@ -1,0 +1,17 @@
+GET http://localhost:8080/api/dependencies
+Expected: 200 OK; registered dependencies appear.
+
+GET http://localhost:8080/api/dependencies/2a556172-5c1f-431a-b131-6d75a299b7bd
+Expected: 200 OK; correct ID, name, URL and status.
+
+POST http://localhost:8080/api/dependencies/2a556172-5c1f-431a-b131-6d75a299b7bd/check
+Expected: Successful check result; counts and timestamp returned.
+
+GET http://localhost:8080/api/dependencies/2a556172-5c1f-431a-b131-6d75a299b7bd/changes
+Expected: 200 OK; empty list is valid if no changes were detected.
+
+GET http://localhost:8080/api/dependencies/not-a-real-id
+Expected: 404 Not Found.
+
+POST http://localhost:8080/api/dependencies — use registration JSON with sourceUrl http://example.com/openapi.json
+Expected: 400 Bad Request for an HTTP URL, because HTTPS is required.

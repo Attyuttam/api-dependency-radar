@@ -69,4 +69,81 @@ class OpenApiSpecFetcherTest {
                         .findFirst()
                         .orElseThrow());
     }
+
+    @Test
+    void shouldRejectResponseExceedingMaximumSize() throws IOException {
+
+        server.createContext(
+                "/large-openapi.yaml",
+                exchange -> {
+                    byte[] response = new byte[5 * 1024 * 1024 + 1];
+
+                    exchange.sendResponseHeaders(200, response.length);
+
+                    try (var outputStream = exchange.getResponseBody()) {
+                        outputStream.write(response);
+                    }
+                });
+
+        OpenApiSpecFetcher fetcher = new OpenApiSpecFetcher(new OpenApiUrlValidator(true, true));
+
+        String url = "http://localhost:"
+                + server.getAddress().getPort()
+                + "/large-openapi.yaml";
+
+        IllegalStateException exception = org.junit.jupiter.api.Assertions
+                .assertThrows(
+                        IllegalStateException.class,
+                        () -> fetcher.fetch(url));
+
+        org.junit.jupiter.api.Assertions.assertTrue(
+                exception.getMessage().contains("maximum allowed size"));
+    }
+
+    @Test
+    void shouldRejectNotFoundResponse() throws IOException {
+
+        server.createContext("/not-found", exchange -> {
+            exchange.sendResponseHeaders(404, -1);
+            exchange.close();
+        });
+
+        OpenApiSpecFetcher fetcher = new OpenApiSpecFetcher(new OpenApiUrlValidator(true, true));
+
+        String url = "http://localhost:"
+                + server.getAddress().getPort()
+                + "/not-found";
+
+        IllegalStateException exception = org.junit.jupiter.api.Assertions
+                .assertThrows(
+                        IllegalStateException.class,
+                        () -> fetcher.fetch(url));
+
+        org.junit.jupiter.api.Assertions.assertTrue(
+                exception.getMessage().contains("HTTP status: 404"));
+    }
+
+    @Test
+    void shouldRejectServerErrorResponse() throws IOException {
+
+        server.createContext("/server-error", exchange -> {
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+
+        OpenApiSpecFetcher fetcher = new OpenApiSpecFetcher(new OpenApiUrlValidator(true, true));
+
+        String url = "http://localhost:"
+                + server.getAddress().getPort()
+                + "/server-error";
+
+        IllegalStateException exception = org.junit.jupiter.api.Assertions
+                .assertThrows(
+                        IllegalStateException.class,
+                        () -> fetcher.fetch(url));
+
+        org.junit.jupiter.api.Assertions.assertTrue(
+                exception.getMessage().contains("HTTP status: 500"));
+    }
+
 }

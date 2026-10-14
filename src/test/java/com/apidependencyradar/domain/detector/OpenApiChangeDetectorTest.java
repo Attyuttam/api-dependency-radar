@@ -895,4 +895,91 @@ class OpenApiChangeDetectorTest {
         assertEquals("GET /users", change.endpoint());
         assertTrue(change.breaking());
     }
+
+    @Test
+    void shouldDetectRemovedResponsePropertyAsBreakingChange() {
+        String PRODUCT_API_V1 = """
+                openapi: 3.0.3
+                info:
+                  title: Product API
+                  version: 1.0.0
+                paths:
+                  /products/{id}:
+                    get:
+                      operationId: getProduct
+                      responses:
+                        '200':
+                          description: Product found
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  id:
+                                    type: integer
+                                  name:
+                                    type: string
+                """;
+
+        String PRODUCT_API_V2 = """
+                openapi: 3.0.3
+                info:
+                  title: Product API
+                  version: 1.1.0
+                paths:
+                  /products/{id}:
+                    get:
+                      operationId: getProduct
+                      responses:
+                        '200':
+                          description: Product found
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  id:
+                                    type: integer
+                """;
+
+        OpenApiChangeDetector detector = new OpenApiChangeDetector();
+
+        var changes = detector.detect(PRODUCT_API_V1, PRODUCT_API_V2);
+
+        assertTrue(
+                changes.stream().anyMatch(change -> change.breaking()
+                        && change.description() != null
+                        && change.description().contains("name")),
+                "Removing the name response property should be detected "
+                        + "as a breaking change. Actual changes: " + changes);
+    }
+
+    @Test
+    void shouldHandleResponseSchemaWithoutProperties() {
+
+        String STRING_RESPONSE_API = """
+                openapi: 3.0.3
+                info:
+                  title: String Response API
+                  version: 1.0.0
+                paths:
+                  /status:
+                    get:
+                      operationId: getStatus
+                      responses:
+                        '200':
+                          description: Current status
+                          content:
+                            text/plain:
+                              schema:
+                                type: string
+                """;
+
+        OpenApiChangeDetector detector = new OpenApiChangeDetector();
+
+        assertDoesNotThrow(
+                () -> detector.detect(
+                        STRING_RESPONSE_API,
+                        STRING_RESPONSE_API));
+    }
 }
