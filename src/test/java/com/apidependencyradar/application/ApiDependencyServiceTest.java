@@ -24,10 +24,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ApiDependencyServiceTest {
@@ -189,6 +191,104 @@ class ApiDependencyServiceTest {
 
                 verify(changeRepository).saveAll(argThat(changes -> changes != null && !changes.iterator().hasNext()));
                 verify(dependencyRepository).save(dependency);
+        }
+
+        @Test
+        void checkNowWhenFetchFailsDoesNotMutateState() {
+                ApiDependencyEntity dependency = new ApiDependencyEntity(
+                                "dep-fail-fetch",
+                                "Example API",
+                                null,
+                                "https://example.com/openapi.yaml",
+                                "OPENAPI",
+                                null,
+                                VALID_SPEC);
+
+                when(dependencyRepository.findById("dep-fail-fetch"))
+                                .thenReturn(Optional.of(dependency));
+                when(specFetcher.fetch(dependency.getSourceUrl()))
+                                .thenThrow(new IllegalStateException("Failed to fetch OpenAPI specification"));
+
+                assertThrows(IllegalStateException.class, () -> service.checkNow("dep-fail-fetch"));
+
+                assertEquals(VALID_SPEC, dependency.getBaselineSpec());
+                verify(dependencyRepository, never()).save(any());
+                verifyNoInteractions(changeRepository);
+                verifyNoInteractions(changeDetector);
+        }
+
+        @Test
+        void checkNowWhenSpecIsInvalidPreservesErrorTranslationAndDoesNotMutateState() {
+                ApiDependencyEntity dependency = new ApiDependencyEntity(
+                                "dep-invalid-spec",
+                                "Example API",
+                                null,
+                                "https://example.com/openapi.yaml",
+                                "OPENAPI",
+                                null,
+                                VALID_SPEC);
+
+                String malformedSpec = "not a valid openapi specification";
+
+                when(dependencyRepository.findById("dep-invalid-spec"))
+                                .thenReturn(Optional.of(dependency));
+                when(specFetcher.fetch(dependency.getSourceUrl()))
+                                .thenReturn(malformedSpec);
+                when(changeDetector.detect(VALID_SPEC, malformedSpec))
+                                .thenThrow(new IllegalArgumentException("Unable to parse OpenAPI specification"));
+
+                IllegalStateException exception = assertThrows(
+                                IllegalStateException.class,
+                                () -> service.checkNow("dep-invalid-spec"));
+
+                assertEquals("The source returned an invalid OpenAPI specification", exception.getMessage());
+                assertNotNull(exception.getCause());
+                assertEquals("Unable to parse OpenAPI specification", exception.getCause().getMessage());
+
+                assertEquals(VALID_SPEC, dependency.getBaselineSpec());
+                verify(dependencyRepository, never()).save(any());
+                verifyNoInteractions(changeRepository);
+        }
+
+        @Test
+        void checkNowWhenChangeDetectorThrowsUnexpectedExceptionDoesNotMutateState() {
+                ApiDependencyEntity dependency = new ApiDependencyEntity(
+                                "dep-detector-error",
+                                "Example API",
+                                null,
+                                "https://example.com/openapi.yaml",
+                                "OPENAPI",
+                                null,
+                                VALID_SPEC);
+
+                String newSpec = VALID_SPEC + "# comment\n";
+
+                when(dependencyRepository.findById("dep-detector-error"))
+                                .thenReturn(Optional.of(dependency));
+                when(specFetcher.fetch(dependency.getSourceUrl()))
+                                .thenReturn(newSpec);
+                when(changeDetector.detect(VALID_SPEC, newSpec))
+                                .thenThrow(new RuntimeException("Unexpected parser failure"));
+
+                RuntimeException exception = assertThrows(
+                                RuntimeException.class,
+                                () -> service.checkNow("dep-detector-error"));
+
+                assertEquals("Unexpected parser failure", exception.getMessage());
+
+                assertEquals(VALID_SPEC, dependency.getBaselineSpec());
+                verify(dependencyRepository, never()).save(any());
+                verifyNoInteractions(changeRepository);
+        }
+
+        @Test
+        void getWithBlankIdThrowsIllegalArgumentException() {
+                assertThrows(IllegalArgumentException.class, () -> service.get("   "));
+        }
+
+        @Test
+        void getWithNullIdThrowsIllegalArgumentException() {
+                assertThrows(IllegalArgumentException.class, () -> service.get(null));
         }
 
 }

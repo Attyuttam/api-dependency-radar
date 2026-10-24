@@ -1,6 +1,9 @@
 package com.apidependencyradar.web.error;
 
+import com.apidependencyradar.application.DuplicateApiDependencyException;
 import jakarta.validation.ConstraintViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +17,8 @@ import java.util.List;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(ResourceNotFoundException.class)
     ResponseEntity<ApiErrorResponse> notFound(ResourceNotFoundException ex) {
@@ -33,9 +38,17 @@ public class GlobalExceptionHandler {
         return response(HttpStatus.BAD_REQUEST, "Request validation failed", details);
     }
 
-    @ExceptionHandler({ConstraintViolationException.class, HttpMessageNotReadableException.class})
-    ResponseEntity<ApiErrorResponse> malformedRequest(Exception ex) {
-        return response(HttpStatus.BAD_REQUEST, "Invalid request", List.of());
+    @ExceptionHandler(ConstraintViolationException.class)
+    ResponseEntity<ApiErrorResponse> constraintViolation(ConstraintViolationException ex) {
+        List<String> details = ex.getConstraintViolations().stream()
+                .map(error -> error.getPropertyPath() + ": " + error.getMessage())
+                .distinct().toList();
+        return response(HttpStatus.BAD_REQUEST, "Request validation failed", details);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ResponseEntity<ApiErrorResponse> malformedRequest(HttpMessageNotReadableException ex) {
+        return response(HttpStatus.BAD_REQUEST, "Invalid request payload", List.of());
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
@@ -46,6 +59,33 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     ResponseEntity<ApiErrorResponse> upstreamFailure(IllegalStateException ex) {
         return response(HttpStatus.BAD_GATEWAY, ex.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(Exception.class)
+    ResponseEntity<ApiErrorResponse> internalError(Exception ex) {
+        if (ex instanceof org.springframework.web.ErrorResponse errorResponse) {
+            HttpStatus status = HttpStatus.resolve(errorResponse.getStatusCode().value());
+            if (status != null && status.is4xxClientError()) {
+                String detail = errorResponse.getBody().getDetail();
+                return response(status, detail != null ? detail : status.getReasonPhrase(), List.of());
+            }
+        }
+        log.error("Unhandled internal server error", ex);
+        return response(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected internal error occurred", List.of());
+    }
+
+    @ExceptionHandler(DuplicateApiDependencyException.class)
+    public ResponseEntity<ApiErrorResponse> handleDuplicateApiDependency(
+            DuplicateApiDependencyException ex) {
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(),
+                ex.getMessage(),
+                List.of());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
     private ResponseEntity<ApiErrorResponse> response(HttpStatus status, String message, List<String> details) {

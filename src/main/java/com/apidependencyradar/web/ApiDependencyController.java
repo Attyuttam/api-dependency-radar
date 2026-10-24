@@ -6,7 +6,10 @@ import com.apidependencyradar.web.dto.ApiDependencyResponse;
 import com.apidependencyradar.web.dto.CheckResultResponse;
 import com.apidependencyradar.web.dto.CreateApiDependencyRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,6 +24,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/dependencies")
+@Validated
 public class ApiDependencyController {
 
     private final ApiDependencyService service;
@@ -43,23 +47,23 @@ public class ApiDependencyController {
     }
 
     @GetMapping("/{id}")
-    public ApiDependencyResponse get(@PathVariable String id) {
+    public ApiDependencyResponse get(@PathVariable @NotBlank @Size(max = 36) String id) {
         return service.get(id);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable String id) {
+    public ResponseEntity<Void> delete(@PathVariable @NotBlank @Size(max = 36) String id) {
         service.delete(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{id}/changes")
-    public List<ApiChangeResponse> changes(@PathVariable String id) {
+    public List<ApiChangeResponse> changes(@PathVariable @NotBlank @Size(max = 36) String id) {
         return service.listChanges(id);
     }
 
     @PostMapping("/{id}/check")
-    public CheckResultResponse checkNow(@PathVariable String id) {
+    public CheckResultResponse checkNow(@PathVariable @NotBlank @Size(max = 36) String id) {
         return service.checkNow(id);
     }
 }

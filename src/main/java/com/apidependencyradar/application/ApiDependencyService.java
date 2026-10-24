@@ -14,6 +14,7 @@ import com.apidependencyradar.web.dto.CreateApiDependencyRequest;
 import com.apidependencyradar.web.error.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.Instant;
 import java.util.List;
@@ -41,20 +42,36 @@ public class ApiDependencyService {
 
     @Transactional
     public ApiDependencyResponse create(CreateApiDependencyRequest request) {
-        String specification = specFetcher.fetch(request.sourceUrl().trim());
+        String sourceUrl = request.sourceUrl().trim();
+
+        if (dependencyRepository.existsBySourceUrl(sourceUrl)) {
+            throw new DuplicateApiDependencyException(
+                    "An API dependency with this source URL already exists");
+        }
+
+        String specification = specFetcher.fetch(sourceUrl);
         validateSpecification(specification);
 
         ApiDependencyEntity entity = new ApiDependencyEntity(
                 UUID.randomUUID().toString(),
                 request.name().trim(),
                 normalizeOptional(request.providerName()),
-                request.sourceUrl().trim(),
+                sourceUrl,
                 SOURCE_TYPE,
                 normalizeOptional(request.description()),
                 specification);
 
-        ApiDependencyEntity saved = dependencyRepository.saveAndFlush(entity);
-        return toDependencyResponse(saved);
+        try {
+            ApiDependencyEntity saved = dependencyRepository.saveAndFlush(entity);
+            return toDependencyResponse(saved);
+        } catch (DataIntegrityViolationException ex) {
+            if (isSourceUrlUniqueConstraintViolation(ex)) {
+                throw new DuplicateApiDependencyException(
+                        "An API dependency with this source URL already exists");
+            }
+
+            throw ex;
+        }
     }
 
     @Transactional(readOnly = true)
@@ -108,12 +125,30 @@ public class ApiDependencyService {
         dependency.markChecked(checkedAt);
         dependencyRepository.save(dependency);
 
-        // Return only changes from this check; historical entries remain available via the changes endpoint.
+        // Return only changes from this check; historical entries remain available via
+        // the changes endpoint.
         List<ApiChangeResponse> currentRunChanges = persistedChanges.stream()
                 .map(change -> toChangeResponse(change, id))
                 .toList();
         int breakingCount = (int) detectedChanges.stream().filter(ApiChange::breaking).count();
         return new CheckResultResponse(id, checkedAt, detectedChanges.size(), breakingCount, currentRunChanges);
+    }
+
+    private boolean isSourceUrlUniqueConstraintViolation(Throwable exception) {
+        Throwable current = exception;
+
+        while (current != null) {
+            if (current instanceof org.hibernate.exception.ConstraintViolationException violation) {
+                if ("uk_api_dependencies_source_url".equals(
+                        violation.getConstraintName())) {
+                    return true;
+                }
+            }
+
+            current = current.getCause();
+        }
+
+        return false;
     }
 
     private void validateSpecification(String specification) {
@@ -125,7 +160,10 @@ public class ApiDependencyService {
     }
 
     private ApiDependencyEntity findDependency(String id) {
-        return dependencyRepository.findById(id)
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("Dependency ID must not be blank");
+        }
+        return dependencyRepository.findById(id.trim())
                 .orElseThrow(() -> new ResourceNotFoundException("API dependency not found: " + id));
     }
 
@@ -144,7 +182,8 @@ public class ApiDependencyService {
     }
 
     private String normalizeOptional(String value) {
-        if (value == null || value.isBlank()) return null;
+        if (value == null || value.isBlank())
+            return null;
         return value.trim();
     }
 }
