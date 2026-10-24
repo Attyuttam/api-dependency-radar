@@ -31,6 +31,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.apidependencyradar.infrastructure.persistence.AppUserEntity;
+import com.apidependencyradar.infrastructure.persistence.AppUserRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+
 @ExtendWith(MockitoExtension.class)
 class ApiDependencyServiceTest {
 
@@ -44,12 +52,39 @@ class ApiDependencyServiceTest {
         OpenApiSpecFetcher specFetcher;
         @Mock
         ApiChangeDetector changeDetector;
+        @Mock
+        AppUserRepository userRepository;
 
         @InjectMocks
         ApiDependencyService service;
 
+        @BeforeEach
+        void setUpAuthenticatedUser() {
+                AppUserEntity owner = new AppUserEntity(
+                                "user-1",
+                                "test-user",
+                                "test-password-hash");
+
+                when(userRepository.findByEmailIgnoreCase("test-user"))
+                                .thenReturn(Optional.of(owner));
+
+                SecurityContextHolder.getContext().setAuthentication(
+                                new UsernamePasswordAuthenticationToken(
+                                                "test-user",
+                                                "not-a-real-password",
+                                                List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        }
+
+        @AfterEach
+        void clearSecurityContext() {
+                SecurityContextHolder.clearContext();
+        }
+
         @Test
         void createFetchesAndStoresTheInitialBaseline() {
+                when(dependencyRepository.existsByOwner_IdAndSourceUrl(
+                                "user-1", "https://example.com/openapi.yaml"))
+                                .thenReturn(false);
                 when(specFetcher.fetch("https://example.com/openapi.yaml")).thenReturn(VALID_SPEC);
                 when(changeDetector.detect(VALID_SPEC, VALID_SPEC)).thenReturn(List.of());
                 when(dependencyRepository.saveAndFlush(any(ApiDependencyEntity.class)))
@@ -73,6 +108,7 @@ class ApiDependencyServiceTest {
         void checkNowPersistsDetectedChangesAndAdvancesTheBaseline() {
                 ApiDependencyEntity dependency = new ApiDependencyEntity(
                                 "dep-1",
+                                new AppUserEntity("user-1", "test-user", "test-password-hash"),
                                 "Example API",
                                 null,
                                 "https://example.com/openapi.yaml",
@@ -89,9 +125,8 @@ class ApiDependencyServiceTest {
                                 "Response property 'name' was removed",
                                 true);
 
-                when(dependencyRepository.findById("dep-1"))
+                when(dependencyRepository.findByIdAndOwner_Id("dep-1", "user-1"))
                                 .thenReturn(Optional.of(dependency));
-
                 when(specFetcher.fetch(dependency.getSourceUrl()))
                                 .thenReturn(updatedSpec);
 
@@ -155,7 +190,7 @@ class ApiDependencyServiceTest {
 
         @Test
         void getUnknownDependencyThrowsNotFound() {
-                when(dependencyRepository.findById("missing")).thenReturn(Optional.empty());
+                when(dependencyRepository.findByIdAndOwner_Id("missing", "user-1")).thenReturn(Optional.empty());
                 assertThrows(ResourceNotFoundException.class, () -> service.get("missing"));
         }
 
@@ -163,6 +198,7 @@ class ApiDependencyServiceTest {
         void checkNowWithNoChangesPersistsNoChangeRecords() {
                 ApiDependencyEntity dependency = new ApiDependencyEntity(
                                 "dep-2",
+                                new AppUserEntity("user-1", "test-user", "test-password-hash"),
                                 "Example API",
                                 null,
                                 "https://example.com/openapi.yaml",
@@ -170,7 +206,7 @@ class ApiDependencyServiceTest {
                                 null,
                                 VALID_SPEC);
 
-                when(dependencyRepository.findById("dep-2"))
+                when(dependencyRepository.findByIdAndOwner_Id("dep-2", "user-1"))
                                 .thenReturn(Optional.of(dependency));
 
                 when(specFetcher.fetch(dependency.getSourceUrl()))
@@ -197,6 +233,7 @@ class ApiDependencyServiceTest {
         void checkNowWhenFetchFailsDoesNotMutateState() {
                 ApiDependencyEntity dependency = new ApiDependencyEntity(
                                 "dep-fail-fetch",
+                                new AppUserEntity("user-1", "test-user", "test-password-hash"),
                                 "Example API",
                                 null,
                                 "https://example.com/openapi.yaml",
@@ -204,7 +241,7 @@ class ApiDependencyServiceTest {
                                 null,
                                 VALID_SPEC);
 
-                when(dependencyRepository.findById("dep-fail-fetch"))
+                when(dependencyRepository.findByIdAndOwner_Id("dep-fail-fetch", "user-1"))
                                 .thenReturn(Optional.of(dependency));
                 when(specFetcher.fetch(dependency.getSourceUrl()))
                                 .thenThrow(new IllegalStateException("Failed to fetch OpenAPI specification"));
@@ -221,6 +258,7 @@ class ApiDependencyServiceTest {
         void checkNowWhenSpecIsInvalidPreservesErrorTranslationAndDoesNotMutateState() {
                 ApiDependencyEntity dependency = new ApiDependencyEntity(
                                 "dep-invalid-spec",
+                                new AppUserEntity("user-1", "test-user", "test-password-hash"),
                                 "Example API",
                                 null,
                                 "https://example.com/openapi.yaml",
@@ -230,7 +268,7 @@ class ApiDependencyServiceTest {
 
                 String malformedSpec = "not a valid openapi specification";
 
-                when(dependencyRepository.findById("dep-invalid-spec"))
+                when(dependencyRepository.findByIdAndOwner_Id("dep-invalid-spec", "user-1"))
                                 .thenReturn(Optional.of(dependency));
                 when(specFetcher.fetch(dependency.getSourceUrl()))
                                 .thenReturn(malformedSpec);
@@ -254,6 +292,7 @@ class ApiDependencyServiceTest {
         void checkNowWhenChangeDetectorThrowsUnexpectedExceptionDoesNotMutateState() {
                 ApiDependencyEntity dependency = new ApiDependencyEntity(
                                 "dep-detector-error",
+                                new AppUserEntity("user-1", "test-user", "test-password-hash"),
                                 "Example API",
                                 null,
                                 "https://example.com/openapi.yaml",
@@ -263,7 +302,7 @@ class ApiDependencyServiceTest {
 
                 String newSpec = VALID_SPEC + "# comment\n";
 
-                when(dependencyRepository.findById("dep-detector-error"))
+                when(dependencyRepository.findByIdAndOwner_Id("dep-detector-error", "user-1"))
                                 .thenReturn(Optional.of(dependency));
                 when(specFetcher.fetch(dependency.getSourceUrl()))
                                 .thenReturn(newSpec);

@@ -8,6 +8,9 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 
 import java.time.Instant;
 
@@ -20,6 +23,10 @@ public class ApiDependencyEntity {
     @Id
     @Column(length = 36, nullable = false, updatable = false)
     private String id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "owner_id", nullable = false)
+    private AppUserEntity owner;
 
     @Column(nullable = false, length = 120)
     private String name;
@@ -57,9 +64,18 @@ public class ApiDependencyEntity {
     protected ApiDependencyEntity() {
     }
 
-    public ApiDependencyEntity(String id, String name, String providerName, String sourceUrl,
-            String sourceType, String description, String baselineSpec) {
+    public ApiDependencyEntity(
+            String id,
+            AppUserEntity owner,
+            String name,
+            String providerName,
+            String sourceUrl,
+            String sourceType,
+            String description,
+            String baselineSpec) {
+
         this.id = id;
+        this.owner = owner;
         this.name = name;
         this.providerName = providerName;
         this.sourceUrl = sourceUrl;
@@ -81,18 +97,59 @@ public class ApiDependencyEntity {
         updatedAt = Instant.now();
     }
 
-    public String getId() { return id; }
-    public String getName() { return name; }
-    public String getProviderName() { return providerName; }
-    public String getSourceUrl() { return sourceUrl; }
-    public String getSourceType() { return sourceType; }
-    public String getDescription() { return description; }
-    public String getBaselineSpec() { return baselineSpec; }
-    public String getStatus() { return status; }
-    public Instant getLastCheckedAt() { return lastCheckedAt; }
-    public Instant getCreatedAt() { return createdAt; }
-    public Instant getUpdatedAt() { return updatedAt; }
+    public String getId() {
+        return id;
+    }
 
-    public void updateBaseline(String baselineSpec) { this.baselineSpec = baselineSpec; }
-    public void markChecked(Instant checkedAt) { this.lastCheckedAt = checkedAt; }
+    public String getName() {
+        return name;
+    }
+
+    public String getProviderName() {
+        return providerName;
+    }
+
+    public String getSourceUrl() {
+        return sourceUrl;
+    }
+
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public String getBaselineSpec() {
+        return baselineSpec;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public Instant getLastCheckedAt() {
+        return lastCheckedAt;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void updateBaseline(String baselineSpec) {
+        this.baselineSpec = baselineSpec;
+    }
+
+    public void markChecked(Instant checkedAt) {
+        this.lastCheckedAt = checkedAt;
+    }
+
+    public AppUserEntity getOwner() {
+        return owner;
+    }
 }

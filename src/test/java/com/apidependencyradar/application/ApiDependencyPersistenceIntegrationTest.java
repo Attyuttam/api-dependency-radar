@@ -25,6 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import com.apidependencyradar.infrastructure.persistence.AppUserEntity;
+import com.apidependencyradar.infrastructure.persistence.AppUserRepository;
+import java.util.UUID;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -88,6 +91,8 @@ class ApiDependencyPersistenceIntegrationTest {
         private MockMvc mockMvc;
         private final ObjectMapper objectMapper = new ObjectMapper();
         @Autowired
+        private AppUserRepository userRepository;
+        @Autowired
         private ApiDependencyRepository dependencyRepository;
         @MockitoBean
         private OpenApiSpecFetcher specFetcher;
@@ -124,6 +129,14 @@ class ApiDependencyPersistenceIntegrationTest {
 
         @BeforeEach
         void cleanUpExistingTestDependencies() {
+                // Ensure the authenticated test principal has a database account.
+                userRepository.findByEmailIgnoreCase("test-user")
+                                .orElseGet(() -> userRepository.saveAndFlush(
+                                                new AppUserEntity(
+                                                                UUID.randomUUID().toString(),
+                                                                "test-user",
+                                                                "test-password-hash")));
+
                 deleteDependenciesBySourceUrl(SOURCE_URL);
         }
 
@@ -138,6 +151,83 @@ class ApiDependencyPersistenceIntegrationTest {
                                                 "Failed to clean up test dependency", e);
                         }
                 }
+        }
+
+        @Test
+        void userCannotAccessAnotherUsersDependency() throws Exception {
+                // User A is created by the existing @BeforeEach fixture.
+                AppUserEntity owner = userRepository
+                                .findByEmailIgnoreCase("test-user")
+                                .orElseThrow();
+
+                // Create a second, independent account for User B.
+                String otherEmail = "isolation-user@example.test";
+
+                AppUserEntity otherUser = userRepository
+                                .findByEmailIgnoreCase(otherEmail)
+                                .orElseGet(() -> userRepository.saveAndFlush(
+                                                new AppUserEntity(
+                                                                UUID.randomUUID().toString(),
+                                                                otherEmail,
+                                                                "test-password-hash")));
+
+                // Persist a dependency owned by User A.
+                String dependencyId = UUID.randomUUID().toString();
+                createdDependencyId = dependencyId;
+
+                dependencyRepository.saveAndFlush(
+                                new ApiDependencyEntity(
+                                                dependencyId,
+                                                owner,
+                                                "Isolation Test API",
+                                                null,
+                                                "https://integration-test.example.com/isolation-openapi.yaml",
+                                                "OPENAPI",
+                                                null,
+                                                SPEC_V1));
+
+                // User B cannot read User A's dependency.
+                mockMvc.perform(
+                                get("/api/dependencies/{id}", dependencyId)
+                                                .with(user(otherUser.getEmail()).roles("USER")))
+                                .andExpect(status().isNotFound());
+
+                // User B cannot read its change history.
+                mockMvc.perform(
+                                get("/api/dependencies/{id}/changes", dependencyId)
+                                                .with(user(otherUser.getEmail()).roles("USER")))
+                                .andExpect(status().isNotFound());
+
+                // User B cannot trigger a check on the dependency.
+                mockMvc.perform(
+                                post("/api/dependencies/{id}/check", dependencyId)
+                                                .with(user(otherUser.getEmail()).roles("USER")))
+                                .andExpect(status().isNotFound());
+
+                // User B cannot delete the dependency.
+                mockMvc.perform(
+                                delete("/api/dependencies/{id}", dependencyId)
+                                                .with(user(otherUser.getEmail()).roles("USER")))
+                                .andExpect(status().isNotFound());
+
+                // User B's list must not expose User A's dependency.
+                MvcResult listResult = mockMvc.perform(
+                                get("/api/dependencies")
+                                                .with(user(otherUser.getEmail()).roles("USER")))
+                                .andExpect(status().isOk())
+                                .andReturn();
+
+                JsonNode dependencies = objectMapper.readTree(
+                                listResult.getResponse().getContentAsString());
+
+                assertTrue(dependencies.isArray());
+                for (JsonNode dependency : dependencies) {
+                        assertFalse(dependencyId.equals(dependency.path("id").asText()));
+                }
+
+                // Confirm User A's dependency still exists and remains accessible.
+                mockMvc.perform(get("/api/dependencies/{id}", dependencyId))
+                                .andExpect(status().isOk());
         }
 
         @Test
