@@ -1,94 +1,123 @@
 package com.apidependencyradar.infrastructure.openapi;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 
-public class OpenApiSpecFetcher {
+import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.util.Timeout;
+import java.time.Duration;
 
-    private final HttpClient httpClient;
-    private final OpenApiUrlValidator urlValidator;
+public class OpenApiSpecFetcher implements AutoCloseable {
 
     private static final int MAX_RESPONSE_SIZE_BYTES = 5 * 1024 * 1024;
+    private static final Duration MAX_FETCH_DURATION = Duration.ofSeconds(30);
+
+    private final CloseableHttpClient httpClient;
+    private final OpenApiUrlValidator urlValidator;
 
     public OpenApiSpecFetcher() {
         this(new OpenApiUrlValidator());
     }
 
     public OpenApiSpecFetcher(OpenApiUrlValidator urlValidator) {
-
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(java.time.Duration.ofSeconds(5))
-                .build();
         this.urlValidator = urlValidator;
 
+        ConnectionConfig connectionConfig = ConnectionConfig.custom()
+                .setConnectTimeout(Timeout.ofSeconds(5))
+                .build();
+
+        var connectionManager = PoolingHttpClientConnectionManagerBuilder
+                .create()
+                .setDnsResolver(new ValidatingDnsResolver(urlValidator))
+                .setDefaultConnectionConfig(connectionConfig)
+                .build();
+
+        RequestConfig requestConfig = RequestConfig.custom()
+                .setResponseTimeout(Timeout.ofSeconds(10))
+                .build();
+
+        this.httpClient = HttpClients.custom()
+                .setConnectionManager(connectionManager)
+                .setDefaultRequestConfig(requestConfig)
+                .disableRedirectHandling()
+                .build();
     }
 
     public String fetch(String url) {
+        long deadlineNanos = System.nanoTime() + MAX_FETCH_DURATION.toNanos();
+
         urlValidator.validate(url);
+        ensureBeforeDeadline(deadlineNanos);
 
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(java.time.Duration.ofSeconds(10))
-                    .GET()
-                    .build();
+            HttpGet request = new HttpGet(URI.create(url));
 
-            HttpResponse<InputStream> response = httpClient.send(
-                    request,
-                    HttpResponse.BodyHandlers.ofInputStream());
+            try (CloseableHttpResponse response = httpClient.execute(request)) {
+                ensureBeforeDeadline(deadlineNanos);
+                int statusCode = response.getCode();
 
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                try (InputStream ignored = response.body()) {
-                    // Close the response body.
+                if (statusCode < 200 || statusCode >= 300) {
+                    throw new IllegalStateException(
+                            "Failed to fetch OpenAPI specification. HTTP status: "
+                                    + statusCode);
                 }
 
-                throw new IllegalStateException(
-                        "Failed to fetch OpenAPI specification. HTTP status: "
-                                + response.statusCode());
-            }
+                HttpEntity entity = response.getEntity();
 
-            try (InputStream inputStream = response.body();
-                    ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+                if (entity == null) {
+                    throw new IllegalStateException(
+                            "OpenAPI specification response has no body");
+                }
 
-                byte[] buffer = new byte[8192];
-                int totalBytes = 0;
-                int bytesRead;
+                try (InputStream inputStream = entity.getContent();
+                        ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
 
-                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    byte[] buffer = new byte[8192];
+                    int totalBytes = 0;
+                    int bytesRead;
 
-                    totalBytes += bytesRead;
+                    while ((bytesRead = inputStream.read(buffer)) != -1) {
+                        ensureBeforeDeadline(deadlineNanos);
 
-                    if (totalBytes > MAX_RESPONSE_SIZE_BYTES) {
-                        throw new IllegalStateException(
-                                "OpenAPI specification exceeds maximum allowed size");
+                        totalBytes += bytesRead;
+
+                        if (totalBytes > MAX_RESPONSE_SIZE_BYTES) {
+                            throw new IllegalStateException(
+                                    "OpenAPI specification exceeds maximum allowed size");
+                        }
+
+                        outputStream.write(buffer, 0, bytesRead);
                     }
 
-                    outputStream.write(buffer, 0, bytesRead);
+                    return outputStream.toString(StandardCharsets.UTF_8);
                 }
-
-                return outputStream.toString(StandardCharsets.UTF_8);
             }
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-
-            throw new IllegalStateException(
-                    "OpenAPI fetch was interrupted",
-                    e);
-
         } catch (IllegalStateException e) {
             throw e;
-
         } catch (Exception e) {
             throw new IllegalStateException(
-                    "Failed to fetch OpenAPI specification",
-                    e);
+                    "Failed to fetch OpenAPI specification", e);
         }
     }
 
+    @Override
+    public void close() throws Exception {
+        httpClient.close();
+    }
+
+    private void ensureBeforeDeadline(long deadlineNanos) {
+        if (System.nanoTime() - deadlineNanos >= 0) {
+            throw new IllegalStateException(
+                    "OpenAPI fetch exceeded maximum allowed duration");
+        }
+    }
 }
