@@ -21,12 +21,15 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import com.apidependencyradar.infrastructure.persistence.AppUserEntity;
 import com.apidependencyradar.infrastructure.persistence.AppUserRepository;
+
+import java.util.List;
 import java.util.UUID;
 
 @SpringBootTest
@@ -141,7 +144,18 @@ class ApiDependencyPersistenceIntegrationTest {
         }
 
         private void deleteDependenciesBySourceUrl(String sourceUrl) {
-                for (ApiDependencyEntity dependency : dependencyRepository.findAllBySourceUrl(sourceUrl)) {
+                AppUserEntity testUser = userRepository
+                                .findByEmailIgnoreCase("test-user")
+                                .orElseThrow();
+
+                List<ApiDependencyEntity> dependencies = dependencyRepository.findAllByOwner_IdOrderByCreatedAtDesc(
+                                testUser.getId());
+
+                for (ApiDependencyEntity dependency : dependencies) {
+                        if (!sourceUrl.equals(dependency.getSourceUrl())) {
+                                continue;
+                        }
+
                         try {
                                 mockMvc.perform(
                                                 delete("/api/dependencies/{id}", dependency.getId()))
@@ -586,6 +600,100 @@ class ApiDependencyPersistenceIntegrationTest {
                                 dependencyRepository.findAll().stream()
                                                 .filter(dependency -> duplicateSourceUrl
                                                                 .equals(dependency.getSourceUrl()))
+                                                .count());
+        }
+
+        @Test
+        void differentUsersCanRegisterTheSameSourceUrl() throws Exception {
+                String sourceUrl = "https://integration-test.example.com/shared-openapi-"
+                                + java.util.UUID.randomUUID() + ".yaml";
+
+                AppUserEntity otherUser = userRepository
+                                .findByEmailIgnoreCase("shared-url-user@example.test")
+                                .orElseGet(() -> userRepository.saveAndFlush(
+                                                new AppUserEntity(
+                                                                java.util.UUID.randomUUID().toString(),
+                                                                "shared-url-user@example.test",
+                                                                "test-password-hash")));
+
+                when(specFetcher.fetch(sourceUrl)).thenReturn(SPEC_V1);
+
+                String requestBody = objectMapper.writeValueAsString(
+                                java.util.Map.of(
+                                                "name", "Shared URL API",
+                                                "sourceUrl", sourceUrl));
+
+                // User A registers the URL.
+                MvcResult userACreateResult = mockMvc.perform(
+                                post("/api/dependencies")
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content(requestBody))
+                                .andExpect(status().isCreated())
+                                .andReturn();
+
+                JsonNode userAResponse = objectMapper.readTree(
+                                userACreateResult.getResponse().getContentAsString());
+                String userADependencyId = userAResponse.get("id").asText();
+
+                createdDependencyId = userADependencyId;
+
+                // User B registers the same URL and should also succeed.
+                MvcResult userBCreateResult = mockMvc.perform(
+                                post("/api/dependencies")
+                                                .with(user(otherUser.getEmail()).roles("USER"))
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content(requestBody))
+                                .andExpect(status().isCreated())
+                                .andReturn();
+
+                JsonNode userBResponse = objectMapper.readTree(
+                                userBCreateResult.getResponse().getContentAsString());
+                String userBDependencyId = userBResponse.get("id").asText();
+
+                assertNotEquals(userADependencyId, userBDependencyId);
+
+                ApiDependencyEntity userADependency = dependencyRepository
+                                .findById(userADependencyId)
+                                .orElseThrow();
+
+                ApiDependencyEntity userBDependency = dependencyRepository
+                                .findById(userBDependencyId)
+                                .orElseThrow();
+
+                String userAOwnerId = dependencyRepository
+                                .findByIdAndOwner_Id(
+                                                userADependencyId,
+                                                userRepository.findByEmailIgnoreCase("test-user")
+                                                                .orElseThrow()
+                                                                .getId())
+                                .orElseThrow()
+                                .getOwner()
+                                .getId();
+
+                String userBOwnerId = dependencyRepository
+                                .findByIdAndOwner_Id(
+                                                userBDependencyId,
+                                                otherUser.getId())
+                                .orElseThrow()
+                                .getId();
+
+                assertEquals(
+                                userRepository.findByEmailIgnoreCase("test-user")
+                                                .orElseThrow()
+                                                .getId(),
+                                userAOwnerId);
+
+                assertEquals(
+                                userBDependencyId,
+                                userBOwnerId);
+
+                assertEquals(sourceUrl, userADependency.getSourceUrl());
+                assertEquals(sourceUrl, userBDependency.getSourceUrl());
+
+                assertEquals(
+                                2L,
+                                dependencyRepository.findAll().stream()
+                                                .filter(dependency -> sourceUrl.equals(dependency.getSourceUrl()))
                                                 .count());
         }
 }
