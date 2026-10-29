@@ -18,18 +18,20 @@ import java.time.Duration;
 
 public class OpenApiSpecFetcher implements AutoCloseable {
 
-    private static final int MAX_RESPONSE_SIZE_BYTES = 5 * 1024 * 1024;
-    private static final Duration MAX_FETCH_DURATION = Duration.ofSeconds(30);
-
+    private final int maxResponseSizeBytes;
+    private final Duration maxFetchDuration;
     private final CloseableHttpClient httpClient;
     private final OpenApiUrlValidator urlValidator;
 
     public OpenApiSpecFetcher() {
-        this(new OpenApiUrlValidator());
+        this(new OpenApiUrlValidator(), 20 * 1024 * 1024, Duration.ofSeconds(30));
     }
 
-    public OpenApiSpecFetcher(OpenApiUrlValidator urlValidator) {
+    public OpenApiSpecFetcher(OpenApiUrlValidator urlValidator, int maxResponseSizeBytes,
+            Duration maxFetchDuration) {
         this.urlValidator = urlValidator;
+        this.maxResponseSizeBytes = maxResponseSizeBytes;
+        this.maxFetchDuration = maxFetchDuration;
 
         ConnectionConfig connectionConfig = ConnectionConfig.custom()
                 .setConnectTimeout(Timeout.ofSeconds(5))
@@ -53,7 +55,7 @@ public class OpenApiSpecFetcher implements AutoCloseable {
     }
 
     public String fetch(String url) {
-        long deadlineNanos = System.nanoTime() + MAX_FETCH_DURATION.toNanos();
+        long deadlineNanos = System.nanoTime() + maxFetchDuration.toNanos();
 
         urlValidator.validate(url);
         ensureBeforeDeadline(deadlineNanos);
@@ -90,7 +92,7 @@ public class OpenApiSpecFetcher implements AutoCloseable {
 
                         totalBytes += bytesRead;
 
-                        if (totalBytes > MAX_RESPONSE_SIZE_BYTES) {
+                        if (totalBytes > maxResponseSizeBytes) {
                             throw new IllegalStateException(
                                     "OpenAPI specification exceeds maximum allowed size");
                         }
