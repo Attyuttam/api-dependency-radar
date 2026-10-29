@@ -29,6 +29,11 @@ public class OpenApiChangeDetector implements ApiChangeDetector {
         return changes;
     }
 
+    @Override
+    public void validate(String specification) {
+        parse(specification);
+    }
+
     private OpenAPI parse(String specification) {
 
         var result = parser.readContents(specification, null, null);

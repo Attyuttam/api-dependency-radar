@@ -7,4 +7,7 @@ import java.util.List;
 public interface ApiChangeDetector {
 
     List<ApiChange> detect(String oldSpec, String newSpec);
+
+    void validate(String specification);
+
 }

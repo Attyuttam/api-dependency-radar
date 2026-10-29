@@ -86,7 +86,6 @@ class ApiDependencyServiceTest {
                                 "user-1", "https://example.com/openapi.yaml"))
                                 .thenReturn(false);
                 when(specFetcher.fetch("https://example.com/openapi.yaml")).thenReturn(VALID_SPEC);
-                when(changeDetector.detect(VALID_SPEC, VALID_SPEC)).thenReturn(List.of());
                 when(dependencyRepository.saveAndFlush(any(ApiDependencyEntity.class)))
                                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -211,9 +210,6 @@ class ApiDependencyServiceTest {
 
                 when(specFetcher.fetch(dependency.getSourceUrl()))
                                 .thenReturn(VALID_SPEC);
-
-                when(changeDetector.detect(VALID_SPEC, VALID_SPEC))
-                                .thenReturn(List.of());
 
                 when(dependencyRepository.save(any(ApiDependencyEntity.class)))
                                 .thenAnswer(invocation -> invocation.getArgument(0));

@@ -345,7 +345,7 @@ public class ApiDependencyService {
 
     private void validateSpecification(String specification) {
         try {
-            changeDetector.detect(specification, specification);
+            changeDetector.validate(specification);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException(
                     "The URL did not return a valid OpenAPI specification", ex);
