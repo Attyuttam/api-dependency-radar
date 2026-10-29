@@ -58,6 +58,15 @@ public class ApiDependencyEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "last_check_success")
+    private Boolean lastCheckSuccess;
+
+    @Column(name = "last_check_error", columnDefinition = "text")
+    private String lastCheckError;
+
+    @Column(name = "next_check_at")
+    private Instant nextCheckAt;
+
     @Version
     private long version;
 
@@ -151,5 +160,30 @@ public class ApiDependencyEntity {
 
     public AppUserEntity getOwner() {
         return owner;
+    }
+
+    public Boolean getLastCheckSuccess() {
+        return lastCheckSuccess;
+    }
+
+    public String getLastCheckError() {
+        return lastCheckError;
+    }
+
+    public Instant getNextCheckAt() {
+        return nextCheckAt;
+    }
+
+    public void markCheckSucceeded(Instant checkedAt, Instant nextCheck) {
+        this.lastCheckedAt = checkedAt;
+        this.lastCheckSuccess = true;
+        this.lastCheckError = null;
+        this.nextCheckAt = nextCheck;
+    }
+
+    public void markCheckFailed(String error, Instant nextCheck) {
+        this.lastCheckSuccess = false;
+        this.lastCheckError = error;
+        this.nextCheckAt = nextCheck;
     }
 }

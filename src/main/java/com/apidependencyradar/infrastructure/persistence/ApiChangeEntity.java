@@ -24,8 +24,7 @@ public class ApiChangeEntity {
     private String id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "dependency_id", nullable = false,
-            foreignKey = @ForeignKey(name = "fk_api_changes_dependency"))
+    @JoinColumn(name = "dependency_id", nullable = false, foreignKey = @ForeignKey(name = "fk_api_changes_dependency"))
     private ApiDependencyEntity dependency;
 
     @Column(name = "source_type", nullable = false, length = 30)
@@ -46,6 +45,21 @@ public class ApiChangeEntity {
     @Column(name = "detected_at", nullable = false, updatable = false)
     private Instant detectedAt;
 
+    @Column(length = 64)
+    private String fingerprint;
+
+    @Column(name = "alert_status", nullable = false, length = 20)
+    private String alertStatus = "NOT_REQUIRED";
+
+    @Column(name = "alert_attempts", nullable = false)
+    private int alertAttempts;
+
+    @Column(name = "alert_last_error", columnDefinition = "text")
+    private String alertLastError;
+
+    @Column(name = "alert_sent_at")
+    private Instant alertSentAt;
+
     protected ApiChangeEntity() {
     }
 
@@ -62,15 +76,75 @@ public class ApiChangeEntity {
 
     @PrePersist
     void onCreate() {
-        if (detectedAt == null) detectedAt = Instant.now();
+        if (detectedAt == null)
+            detectedAt = Instant.now();
     }
 
-    public String getId() { return id; }
-    public ApiDependencyEntity getDependency() { return dependency; }
-    public String getSourceType() { return sourceType; }
-    public String getType() { return type; }
-    public String getEndpoint() { return endpoint; }
-    public String getDescription() { return description; }
-    public boolean isBreaking() { return breaking; }
-    public Instant getDetectedAt() { return detectedAt; }
+    public String getId() {
+        return id;
+    }
+
+    public ApiDependencyEntity getDependency() {
+        return dependency;
+    }
+
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public String getEndpoint() {
+        return endpoint;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public boolean isBreaking() {
+        return breaking;
+    }
+
+    public Instant getDetectedAt() {
+        return detectedAt;
+    }
+
+    public String getFingerprint() {
+        return fingerprint;
+    }
+
+    public String getAlertStatus() {
+        return alertStatus;
+    }
+
+    public int getAlertAttempts() {
+        return alertAttempts;
+    }
+
+    public String getAlertLastError() {
+        return alertLastError;
+    }
+
+    public Instant getAlertSentAt() {
+        return alertSentAt;
+    }
+
+    public void markAlertPending() {
+        this.alertStatus = "PENDING";
+    }
+
+    public void markAlertSent(Instant sentAt) {
+        this.alertStatus = "SENT";
+        this.alertSentAt = sentAt;
+        this.alertLastError = null;
+    }
+
+    public void markAlertFailed(String error) {
+        this.alertStatus = "FAILED";
+        this.alertAttempts++;
+        this.alertLastError = error;
+    }
 }

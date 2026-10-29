@@ -28,6 +28,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
 
 @Service
 public class ApiDependencyService {
@@ -40,18 +43,21 @@ public class ApiDependencyService {
     private final AppUserRepository userRepository;
     private final OpenApiSpecFetcher specFetcher;
     private final ApiChangeDetector changeDetector;
+    private final ScheduledCheckPersistenceService scheduledCheckPersistenceService;
 
     public ApiDependencyService(
             ApiDependencyRepository dependencyRepository,
             ApiChangeRepository changeRepository,
             AppUserRepository userRepository,
             OpenApiSpecFetcher specFetcher,
-            ApiChangeDetector changeDetector) {
+            ApiChangeDetector changeDetector,
+            ScheduledCheckPersistenceService scheduledCheckPersistenceService) {
         this.dependencyRepository = dependencyRepository;
         this.changeRepository = changeRepository;
         this.userRepository = userRepository;
         this.specFetcher = specFetcher;
         this.changeDetector = changeDetector;
+        this.scheduledCheckPersistenceService = scheduledCheckPersistenceService;
     }
 
     @Transactional
@@ -136,15 +142,95 @@ public class ApiDependencyService {
         AppUserEntity owner = currentUser();
         ApiDependencyEntity dependency = findDependency(id, owner);
 
-        String currentSpecification = specFetcher.fetch(dependency.getSourceUrl());
+        return performCheck(dependency, false, null);
+    }
+
+    public void checkScheduled(String id) {
+        String token = tryClaimScheduledCheck(id);
+
+        if (token == null) {
+            return;
+        }
+
+        try {
+            ApiDependencyEntity dependency = dependencyRepository.findById(id)
+                    .orElse(null);
+
+            if (dependency == null) {
+                return;
+            }
+
+            performCheck(dependency, true, token);
+        } finally {
+            dependencyRepository.releaseDependencyClaim(id, token);
+        }
+    }
+
+    public String tryClaimScheduledCheck(String dependencyId) {
+        Instant now = Instant.now();
+        String token = UUID.randomUUID().toString();
+
+        int claimed = dependencyRepository.claimDependency(
+                dependencyId,
+                token,
+                now,
+                now.plus(Duration.ofMinutes(5)));
+
+        return claimed == 1 ? token : null;
+    }
+
+    private CheckResultResponse performCheck(
+            ApiDependencyEntity dependency,
+            boolean scheduled,
+            String claimToken) {
+
+        String currentSpecification;
+
+        try {
+            currentSpecification = specFetcher.fetch(
+                    dependency.getSourceUrl());
+        } catch (RuntimeException ex) {
+            if (!scheduled) {
+                throw ex;
+            }
+
+            scheduledCheckPersistenceService.recordFailureIfClaimValid(
+                    dependency.getId(),
+                    claimToken,
+                    ex);
+            return null;
+        }
 
         List<ApiChange> detectedChanges;
+
         try {
             detectedChanges = changeDetector.detect(
-                    dependency.getBaselineSpec(), currentSpecification);
+                    dependency.getBaselineSpec(),
+                    currentSpecification);
         } catch (IllegalArgumentException ex) {
-            throw new IllegalStateException(
-                    "The source returned an invalid OpenAPI specification", ex);
+            IllegalStateException invalidSpec = new IllegalStateException(
+                    "The source returned an invalid OpenAPI specification",
+                    ex);
+
+            if (!scheduled) {
+                throw invalidSpec;
+            }
+
+            scheduledCheckPersistenceService.recordFailureIfClaimValid(
+                    dependency.getId(),
+                    claimToken,
+                    invalidSpec);
+            return null;
+        } catch (RuntimeException ex) {
+            if (!scheduled) {
+                throw ex;
+            }
+
+            scheduledCheckPersistenceService.recordFailureIfClaimValid(
+                    dependency.getId(),
+                    claimToken,
+                    ex);
+            return null;
         }
 
         Instant checkedAt = Instant.now();
@@ -163,11 +249,17 @@ public class ApiDependencyService {
         List<ApiChangeEntity> persistedChanges = changeRepository.saveAll(newChangeEntities);
 
         dependency.updateBaseline(currentSpecification);
-        dependency.markChecked(checkedAt);
+
+        dependency.markCheckSucceeded(
+                checkedAt,
+                checkedAt.plus(Duration.ofHours(24)));
+
         dependencyRepository.save(dependency);
 
         List<ApiChangeResponse> currentRunChanges = persistedChanges.stream()
-                .map(change -> toChangeResponse(change, dependency.getId()))
+                .map(change -> toChangeResponse(
+                        change,
+                        dependency.getId()))
                 .toList();
 
         int breakingCount = (int) detectedChanges.stream()
@@ -180,6 +272,31 @@ public class ApiDependencyService {
                 detectedChanges.size(),
                 breakingCount,
                 currentRunChanges);
+    }
+
+    private void recordScheduledFailure(
+            ApiDependencyEntity dependency,
+            RuntimeException exception) {
+
+        String message = exception.getMessage();
+
+        if (message == null || message.isBlank()) {
+            message = exception.getClass().getSimpleName();
+        } else {
+            message = exception.getClass().getSimpleName()
+                    + ": " + message;
+        }
+
+        // Avoid storing an excessively large error message.
+        if (message.length() > 1000) {
+            message = message.substring(0, 1000);
+        }
+
+        dependency.markCheckFailed(
+                message,
+                Instant.now().plus(Duration.ofMinutes(15)));
+
+        dependencyRepository.save(dependency);
     }
 
     private AppUserEntity currentUser() {
